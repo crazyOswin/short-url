@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 
 /**
@@ -21,6 +22,8 @@ public class ShortUrlServiceImpl implements ShortUrlService {
     private static final Logger LOGGER = LoggerFactory.getLogger(ShortUrlServiceImpl.class);
 
     private static final String BASE_URL = "http://w.com/";
+
+    ReentrantLock lock = new ReentrantLock();
 
     /**
      * 长域名为key短域名为value
@@ -39,27 +42,36 @@ public class ShortUrlServiceImpl implements ShortUrlService {
      * @author wangjianzhi
      */
     @Override
-    public synchronized String getShortUrl(String longUrl, int maxRetryNum) throws Exception {
-        String shortUrl = shortUrlDataMap.get(longUrl);
-        if (StringUtils.isNotBlank(shortUrl)) {
+    public String getShortUrl(String longUrl, int maxRetryNum) throws Exception {
+        lock.lock();
+        try {
+            String shortUrl = shortUrlDataMap.get(longUrl);
+            if (StringUtils.isNotBlank(shortUrl)) {
+                return shortUrl;
+            }
+            boolean retry = true;
+            int retryNum = 0;
+            while (retry) {
+                if (retryNum > maxRetryNum) {
+                    LOGGER.error("获取短域名异常");
+                    throw new Exception("获取短域名异常");
+                }
+                shortUrl = BASE_URL + HashUtils.murmur32HashSeed(longUrl, (int) System.currentTimeMillis());
+                if (StringUtils.isBlank(longUrlDataMap.get(shortUrl))) {
+                    retry = false;
+                }
+                retryNum++;
+            }
+            shortUrlDataMap.put(longUrl, shortUrl);
+            longUrlDataMap.put(shortUrl, longUrl);
             return shortUrl;
         }
-        boolean retry = true;
-        int retryNum = 0;
-        while (retry) {
-            if (retryNum > maxRetryNum) {
-                LOGGER.error("获取短域名异常");
-                throw new Exception("获取短域名异常");
-            }
-            shortUrl = BASE_URL + HashUtils.murmur32HashSeed(longUrl, (int) System.currentTimeMillis());
-            if (StringUtils.isBlank(longUrlDataMap.get(shortUrl))) {
-                retry = false;
-            }
-            retryNum++;
+        catch (Exception e) {
+            throw e;
         }
-        shortUrlDataMap.put(longUrl, shortUrl);
-        longUrlDataMap.put(shortUrl, longUrl);
-        return shortUrl;
+        finally {
+            lock.unlock();
+        }
     }
 
     /**
